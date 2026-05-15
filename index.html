@@ -216,7 +216,7 @@
   const WIDTH = 420, HEIGHT = 760;
   const PLATFORM_Y = 560, PLATFORM_W = 180, WATER_Y = 620;
   const COLORS = ["#ef5350","#66bb6a","#42a5f5","#ffca28","#ab47bc","#ffa726","#ec407a","#26c6da","#9ccc65"];
-  const KINDS = ["box","long","square","tri","lshape"];
+  const KINDS = ["square"];
 
   const $ = id => document.getElementById(id);
   const scoreEl = $("score"), bestEl = $("best");
@@ -233,6 +233,9 @@
   let state = "playing", score = 0;
   let best = parseInt(localStorage.getItem("stack-high") || "0", 10);
   let dropX = WIDTH / 2;
+  let cameraY = 0; // Camera offset for scrolling
+  let cameraVelocity = 0; // For smooth camera movement
+  let platform, pillar, water; // Store body references for camera logic
   bestEl.textContent = best;
 
   // Hand control variables
@@ -268,7 +271,8 @@
   function makeShape(kind, x, y) {
     const color = rand(COLORS);
     const opts = {
-      density: 0.005, friction: 0.95, frictionStatic: 1.5, restitution: 0.02,
+      density: 0.2, friction: 0.95, frictionStatic: 1.5, restitution: 0,
+      frictionAir: 0.02,
       render: { fillStyle: color }, chamfer: { radius: 6 }
     };
     switch(kind) {
@@ -285,7 +289,9 @@
   }
 
   function spawn() {
-    const body = makeShape(rand(KINDS), dropX, 70);
+    // Spawn at the top of the visible screen
+    const spawnY = cameraY + 70;
+    const body = makeShape(rand(KINDS), dropX, spawnY);
     Matter.Body.setStatic(body, true);
     active = body;
     Matter.Composite.add(engine.world, body);
@@ -516,7 +522,7 @@
       const dx = rawHandX - pinchAnchorHandX;
       const dy = rawHandY - pinchAnchorHandY;
       const targetX = Math.max(30, Math.min(WIDTH - 30, pinchAnchorBlockX + dx));
-      const targetY = Math.max(60, Math.min(PLATFORM_Y - 40, pinchAnchorBlockY + dy));
+      const targetY = Math.max(cameraY + HEIGHT / 2, Math.min(PLATFORM_Y - 40, pinchAnchorBlockY + dy));
 
       smoothX = smoothX + (targetX - smoothX) * SMOOTH;
       smoothY = smoothY + (targetY - smoothY) * SMOOTH;
@@ -667,13 +673,13 @@
     });
     runner = Matter.Runner.create();
 
-    const platform = Matter.Bodies.rectangle(WIDTH/2, PLATFORM_Y, PLATFORM_W, 16, {
+    platform = Matter.Bodies.rectangle(WIDTH/2, PLATFORM_Y, PLATFORM_W, 16, {
       isStatic: true, friction: 1, chamfer: { radius: 4 }, render: { fillStyle: "#8a929c" }
     });
-    const pillar = Matter.Bodies.rectangle(WIDTH/2, PLATFORM_Y + 70, 60, 140, {
+    pillar = Matter.Bodies.rectangle(WIDTH/2, PLATFORM_Y + 70, 60, 140, {
       isStatic: true, render: { fillStyle: "#a8b0bb" }
     });
-    const water = Matter.Bodies.rectangle(WIDTH/2, 720, WIDTH*2, 160, {
+    water = Matter.Bodies.rectangle(WIDTH/2, 720, WIDTH*2, 160, {
       isStatic: true, isSensor: true, label: "water", render: { visible: false }
     });
     Matter.Composite.add(engine.world, [platform, pillar, water]);
@@ -681,7 +687,10 @@
     Matter.Events.on(engine, "collisionStart", e => {
       for (const p of e.pairs) {
         const other = p.bodyA.label === "water" ? p.bodyB : p.bodyB.label === "water" ? p.bodyA : null;
-        if (other && other.isStacked && state === "playing") gameOver();
+        // Game over if any block (not platform/pillar/water) touches water
+        if (other && other !== platform && other !== pillar && state === "playing") {
+          gameOver();
+        }
       }
     });
 
@@ -699,6 +708,42 @@
           }
         } else b._still = 0;
       }
+      
+      // Update camera to follow only set blocks (static)
+      let minY = PLATFORM_Y;
+      for (const b of bodies) {
+        if (b !== water && b !== platform && b !== pillar && b !== active && b.isStatic) {
+          minY = Math.min(minY, b.position.y - 60);
+        }
+      }
+
+      // Only start moving camera once tower reaches middle of screen
+      let targetCameraY = 0;
+      if (minY < HEIGHT / 2) {
+        // Tower is reaching the middle, start scrolling up
+        targetCameraY = minY - HEIGHT / 2;
+      }
+      cameraY += (targetCameraY - cameraY) * 0.08;
+      cameraVelocity = 0;
+
+      // Apply camera by shifting Matter.Render's bounds (this is what actually works)
+      if (render) {
+        render.bounds.min.x = 0;
+        render.bounds.max.x = WIDTH;
+        render.bounds.min.y = cameraY;
+        render.bounds.max.y = cameraY + HEIGHT;
+        render.options.hasBounds = true;
+      }
+      
+      // Move the water/wave overlay down with the camera so it stays "at world y=720"
+      // cameraY is <= 0 (negative when scrolled up), so we translate water by -cameraY px down
+      const waterEl = document.getElementById('water');
+      if (waterEl) {
+        const rect = game.getBoundingClientRect();
+        const sy = rect.height / HEIGHT;
+        waterEl.style.transform = `translateY(${(-cameraY) * sy}px)`;
+      }
+
       updateRocket();
     });
 
@@ -712,7 +757,7 @@
       const rect = game.getBoundingClientRect();
       const sx = rect.width / WIDTH, sy = rect.height / HEIGHT;
       rocketEl.style.left = (active.position.x * sx) + "px";
-      rocketEl.style.top = ((active.position.y - 50) * sy) + "px";
+      rocketEl.style.top = (50 * sy) + "px";
       rocketEl.style.display = "block";
     } else {
       rocketEl.style.display = "none";
@@ -782,6 +827,8 @@
     state = "playing";
     score = 0;
     scoreEl.textContent = "0";
+    cameraY = 0;
+    cameraVelocity = 0;
     overlay.classList.remove("show");
     init();
 
