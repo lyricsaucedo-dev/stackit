@@ -216,7 +216,7 @@
   const WIDTH = 420, HEIGHT = 760;
   const PLATFORM_Y = 560, PLATFORM_W = 180, WATER_Y = 620;
   const COLORS = ["#ef5350","#66bb6a","#42a5f5","#ffca28","#ab47bc","#ffa726","#ec407a","#26c6da","#9ccc65"];
-  const KINDS = ["box","long","square","tri","lshape","circle","tall","wide"];
+  const KINDS = ["box","long","square","tri","lshape","tall","wide"];
 
   const $ = id => document.getElementById(id);
   const scoreEl = $("score"), bestEl = $("best");
@@ -230,6 +230,7 @@
 
   let engine, render, runner;
   let active = null, locked = new Set();
+  let lastDropped = null; // Track the last dropped block to ensure it settles before next drop
   let state = "playing", score = 0;
   let best = parseInt(localStorage.getItem("stack-high") || "0", 10);
   let dropX = WIDTH / 2;
@@ -280,7 +281,6 @@
       case "long": return Matter.Bodies.rectangle(x, y, 110, 22, opts);
       case "square": return Matter.Bodies.rectangle(x, y, 56, 56, opts);
       case "tri": return Matter.Bodies.polygon(x, y, 3, 42, {...opts, chamfer: {radius:4}});
-      case "circle": return Matter.Bodies.circle(x, y, 28, {...opts, chamfer: {radius:2}});
       case "tall": return Matter.Bodies.rectangle(x, y, 40, 70, opts);
       case "wide": return Matter.Bodies.rectangle(x, y, 140, 28, opts);
       case "lshape": {
@@ -792,21 +792,40 @@
 
   function drop() {
     if (state !== "playing" || !active) return;
+    // Don't allow dropping if the last block hasn't settled yet
+    if (lastDropped && !locked.has(lastDropped.id)) return;
+    
     const a = active;
     Matter.Body.setStatic(a, false);
     a.isStacked = true;
     active = null;
+    lastDropped = a;
     handPinching = false;
     handStartY = null;
     isHandControlActive = false;
     rocketEl.style.display = "none";
     score++;
     scoreEl.textContent = score;
+    
     const iv = setInterval(() => {
       if (state !== "playing") { clearInterval(iv); return; }
       const s = Math.hypot(a.velocity.x, a.velocity.y);
       if (s < 0.15 || locked.has(a.id)) {
         clearInterval(iv);
+        // Block has settled, make it static and lock it
+        Matter.Body.setStatic(a, true);
+        locked.add(a.id);
+        lastDropped = null;
+        
+        // Now add platform if score is even
+        if (score % 50 === 0) {
+          const platformBlock = Matter.Bodies.rectangle(WIDTH/2, a.bounds.min.y - 8, PLATFORM_W, 16, {
+            isStatic: true, friction: 1, chamfer: { radius: 4 }, render: { fillStyle: "#FFD700" }
+          });
+          Matter.Composite.add(engine.world, platformBlock);
+          locked.add(platformBlock.id);
+        }
+        
         if (state === "playing") spawn();
       }
     }, 100);
@@ -850,6 +869,7 @@
     Matter.Engine.clear(engine);
     locked.clear();
     active = null;
+    lastDropped = null;
     state = "playing";
     score = 0;
     scoreEl.textContent = "0";
