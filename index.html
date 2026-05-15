@@ -216,7 +216,7 @@
   const WIDTH = 420, HEIGHT = 760;
   const PLATFORM_Y = 560, PLATFORM_W = 180, WATER_Y = 620;
   const COLORS = ["#ef5350","#66bb6a","#42a5f5","#ffca28","#ab47bc","#ffa726","#ec407a","#26c6da","#9ccc65"];
-  const KINDS = ["square"];
+  const KINDS = ["box","long","square","tri","lshape","circle","tall","wide"];
 
   const $ = id => document.getElementById(id);
   const scoreEl = $("score"), bestEl = $("best");
@@ -269,7 +269,7 @@
   const rand = arr => arr[Math.floor(Math.random() * arr.length)];
 
   function makeShape(kind, x, y) {
-    const color = rand(COLORS);
+    const color = kind === "rocket" ? "#FFD700" : rand(COLORS);
     const opts = {
       density: 0.2, friction: 0.95, frictionStatic: 1.5, restitution: 0,
       frictionAir: 0.02,
@@ -280,6 +280,9 @@
       case "long": return Matter.Bodies.rectangle(x, y, 110, 22, opts);
       case "square": return Matter.Bodies.rectangle(x, y, 56, 56, opts);
       case "tri": return Matter.Bodies.polygon(x, y, 3, 42, {...opts, chamfer: {radius:4}});
+      case "circle": return Matter.Bodies.circle(x, y, 28, {...opts, chamfer: {radius:2}});
+      case "tall": return Matter.Bodies.rectangle(x, y, 40, 70, opts);
+      case "wide": return Matter.Bodies.rectangle(x, y, 140, 28, opts);
       case "lshape": {
         const a = Matter.Bodies.rectangle(x-15, y, 56, 24, opts);
         const b = Matter.Bodies.rectangle(x+5, y+16, 24, 56, opts);
@@ -749,6 +752,29 @@
 
     Matter.Render.run(render);
     Matter.Runner.run(runner, engine);
+    
+    // Draw emojis on blocks
+    const canvas = render.context.canvas;
+    const ctx = render.context;
+    
+    Matter.Events.on(render, "afterRender", () => {
+      const bodies = Matter.Composite.allBodies(engine.world);
+      for (const b of bodies) {
+        if (b.emoji) {
+          const x = b.position.x - render.bounds.min.x;
+          const y = b.position.y - render.bounds.min.y;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(b.angle);
+          ctx.font = "32px Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(b.emoji, 0, 0);
+          ctx.restore();
+        }
+      }
+    });
+    
     spawn();
   }
 
